@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang=zh>
+<head>
+    <!-- so meta -->
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="HandheldFriendly" content="True">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+    <meta name="description" content="Redis与分布式锁SET NX锁通常是为共享资源的访问提供互斥能力，分布式锁适用于为分布式环境下的共享资源的并发访问，通常是在分布式的共享资源自身无法提供互斥能力的情况下（如分布式文件系统等）。客户端访问分布式共享资源的步骤一般是：1. 尝试加锁；2. 加锁成功则可以进行共享资源访问；3. 解锁。其中，加锁和解锁操作需要具有原子性，不会出现加锁加到一半或者解锁解到一半的情况。不具备原子性的加锁&amp;">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Redis分布式锁">
+<meta property="og:url" content="http://example.com/2022/11/27/redlock/index.html">
+<meta property="og:site_name" content="IanXiao">
+<meta property="og:description" content="Redis与分布式锁SET NX锁通常是为共享资源的访问提供互斥能力，分布式锁适用于为分布式环境下的共享资源的并发访问，通常是在分布式的共享资源自身无法提供互斥能力的情况下（如分布式文件系统等）。客户端访问分布式共享资源的步骤一般是：1. 尝试加锁；2. 加锁成功则可以进行共享资源访问；3. 解锁。其中，加锁和解锁操作需要具有原子性，不会出现加锁加到一半或者解锁解到一半的情况。不具备原子性的加锁&amp;">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="http://example.com/2022/11/27/redlock/redlock1.png">
+<meta property="og:image" content="http://example.com/2022/11/27/redlock/redlock2.png">
+<meta property="og:image" content="http://example.com/2022/11/27/redlock/redlock3.png">
+<meta property="og:image" content="http://example.com/2022/11/27/redlock/redlock4.png">
+<meta property="og:image" content="http://example.com/2022/11/27/redlock/redlock5.png">
+<meta property="og:image" content="http://example.com/2022/11/27/redlock/redlock6.png">
+<meta property="og:image" content="http://example.com/2022/11/27/redlock/redlock7.png">
+<meta property="article:published_time" content="2022-11-27T08:36:20.000Z">
+<meta property="article:modified_time" content="2022-11-27T08:52:22.424Z">
+<meta property="article:author" content="Ian Xiao">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http://example.com/2022/11/27/redlock/redlock1.png">
+    
+    
+      
+        
+          <link rel="shortcut icon" href="/images/favicon.ico">
+        
+      
+      
+        
+          <link rel="icon" type="image/png" href="/images/favicon-192x192.png" sizes="192x192">
+        
+      
+      
+        
+          <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+        
+      
+    
+    <!-- title -->
+    <title>Redis分布式锁</title>
+    <!-- styles -->
+    
+<link rel="stylesheet" href="/css/style.css">
+
+    <!-- persian styles -->
+    
+    <!-- rss -->
+    
+    
+	<!-- mathjax -->
+	
+		<script type="text/x-mathjax-config">
+		  MathJax.Hub.Config({
+			tex2jax: {
+			  skipTags: ['script', 'noscript', 'style', 'textarea', 'pre'],
+			  inlineMath: [['$','$']]
+			}
+		  });
+		</script>
+		<script src='https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/latest.js?config=TeX-MML-AM_CHTML' async></script>
+	
+<meta name="generator" content="Hexo 6.3.0"></head>
+
+<body class="max-width mx-auto px3 ltr">
+    
+      <div id="header-post">
+  <a id="menu-icon" href="#" aria-label="目录"><i class="fas fa-bars fa-lg"></i></a>
+  <a id="menu-icon-tablet" href="#" aria-label="目录"><i class="fas fa-bars fa-lg"></i></a>
+  <a id="top-icon-tablet" href="#" aria-label="顶部" onclick="$('html, body').animate({ scrollTop: 0 }, 'fast');" style="display:none;"><i class="fas fa-chevron-up fa-lg"></i></a>
+  <span id="menu">
+    <span id="nav">
+      <ul>
+        <!--
+       --><li><a href="/">首页</a></li><!--
+     --><!--
+       --><li><a href="/archives/">归档</a></li><!--
+     --><!--
+       --><li><a href="/about/">关于</a></li><!--
+     -->
+      </ul>
+    </span>
+    <br/>
+    <span id="actions">
+      <ul>
+        
+        
+        <li><a class="icon" aria-label="返回顶部" href="#" onclick="$('html, body').animate({ scrollTop: 0 }, 'fast');"><i class="fas fa-chevron-up" aria-hidden="true" onmouseover="$('#i-top').toggle();" onmouseout="$('#i-top').toggle();"></i></a></li>
+        <li><a class="icon" aria-label="分享文章" href="#"><i class="fas fa-share-alt" aria-hidden="true" onmouseover="$('#i-share').toggle();" onmouseout="$('#i-share').toggle();" onclick="$('#share').toggle();return false;"></i></a></li>
+      </ul>
+      <span id="i-prev" class="info" style="display:none;">上一篇</span>
+      <span id="i-next" class="info" style="display:none;">下一篇</span>
+      <span id="i-top" class="info" style="display:none;">返回顶部</span>
+      <span id="i-share" class="info" style="display:none;">分享文章</span>
+    </span>
+    <br/>
+    <div id="share" style="display: none">
+      <ul>
+  <li><a class="icon" target="_blank" rel="noopener" href="http://www.facebook.com/sharer.php?u=http://example.com/2022/11/27/redlock/"><i class="fab fa-facebook " aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="https://twitter.com/share?url=http://example.com/2022/11/27/redlock/&text=Redis分布式锁"><i class="fab fa-twitter " aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="http://www.linkedin.com/shareArticle?url=http://example.com/2022/11/27/redlock/&title=Redis分布式锁"><i class="fab fa-linkedin " aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="https://pinterest.com/pin/create/bookmarklet/?url=http://example.com/2022/11/27/redlock/&is_video=false&description=Redis分布式锁"><i class="fab fa-pinterest " aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="mailto:?subject=Redis分布式锁&body=Check out this article: http://example.com/2022/11/27/redlock/"><i class="fas fa-envelope " aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="https://getpocket.com/save?url=http://example.com/2022/11/27/redlock/&title=Redis分布式锁"><i class="fab fa-get-pocket " aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="http://reddit.com/submit?url=http://example.com/2022/11/27/redlock/&title=Redis分布式锁"><i class="fab fa-reddit " aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="http://www.stumbleupon.com/submit?url=http://example.com/2022/11/27/redlock/&title=Redis分布式锁"><i class="fab fa-stumbleupon " aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="http://digg.com/submit?url=http://example.com/2022/11/27/redlock/&title=Redis分布式锁"><i class="fab fa-digg " aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="http://www.tumblr.com/share/link?url=http://example.com/2022/11/27/redlock/&name=Redis分布式锁&description="><i class="fab fa-tumblr " aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="https://news.ycombinator.com/submitlink?u=http://example.com/2022/11/27/redlock/&t=Redis分布式锁"><i class="fab fa-hacker-news " aria-hidden="true"></i></a></li>
+</ul>
+
+    </div>
+    <div id="toc">
+      <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Redis%E4%B8%8E%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81"><span class="toc-number">1.</span> <span class="toc-text">Redis与分布式锁</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#SET-NX"><span class="toc-number">1.1.</span> <span class="toc-text">SET NX</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E8%BF%87%E6%9C%9F%E6%97%B6%E9%97%B4"><span class="toc-number">1.2.</span> <span class="toc-text">过期时间</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%AE%A2%E6%88%B7%E7%AB%AF%E6%A0%87%E8%AF%86"><span class="toc-number">1.3.</span> <span class="toc-text">客户端标识</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Redlock"><span class="toc-number">2.</span> <span class="toc-text">Redlock</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%B8%BB%E4%BB%8E%E5%A4%8D%E5%88%B6Redis%E4%B8%8E%E8%84%91%E8%A3%82"><span class="toc-number">2.1.</span> <span class="toc-text">主从复制Redis与脑裂</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Redlock%E5%AE%9E%E7%8E%B0"><span class="toc-number">2.2.</span> <span class="toc-text">Redlock实现</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E9%93%BE%E6%8E%A5"><span class="toc-number">3.</span> <span class="toc-text">参考链接</span></a></li></ol>
+    </div>
+  </span>
+</div>
+
+    
+    <div class="content index py4">
+        
+        <article class="post" itemscope itemtype="http://schema.org/BlogPosting">
+  <header>
+    
+    <h1 class="posttitle" itemprop="name headline">
+        Redis分布式锁
+    </h1>
+
+
+
+    <div class="meta">
+      <span class="author" itemprop="author" itemscope itemtype="http://schema.org/Person">
+        <span itemprop="name">Ian Xiao</span>
+      </span>
+      
+    <div class="postdate">
+      
+        <time datetime="2022-11-27T08:36:20.000Z" itemprop="datePublished">2022-11-27</time>
+        
+      
+    </div>
+
+
+      
+
+      
+
+    </div>
+  </header>
+  
+
+  <div class="content" itemprop="articleBody">
+    <h2 id="Redis与分布式锁"><a href="#Redis与分布式锁" class="headerlink" title="Redis与分布式锁"></a>Redis与分布式锁</h2><h3 id="SET-NX"><a href="#SET-NX" class="headerlink" title="SET NX"></a>SET NX</h3><p>锁通常是为共享资源的访问提供互斥能力，分布式锁适用于为分布式环境下的共享资源的并发访问，通常是在分布式的共享资源自身无法提供互斥能力的情况下（如分布式文件系统等）。<br>客户端访问分布式共享资源的步骤一般是：1. 尝试加锁；2. 加锁成功则可以进行共享资源访问；3. 解锁。其中，加锁和解锁操作需要具有<strong>原子性</strong>，不会出现加锁加到一半或者解锁解到一半的情况。<br>不具备原子性的加锁&#x2F;解锁操作会造成一些问题，如客户端1加锁只进行了一半，另外一个客户端2也尝试加锁，由于客户端1还未成功，所以客户端2也可进行加锁操作，最终可能造成客户端1和2同时持有同一个锁的情况。<br>为什么不在尝试加锁之前检查有没有其它加锁操作正在进行呢？</p>
+<p>Redis 为 <code>SET</code> 操作提供了可选的 <code>NX</code> 参数，实现<strong>若不存在则设置</strong>的原子操作，可以利用<code>SET NX</code>来实现分布式锁。而解锁时，只需要使用<code>DEL</code>将对应的KEY删除即可。</p>
+<figure class="highlight golang"><figcaption><span>SET NX 分布式锁使用示例1</span></figcaption><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">setNxExample1</span><span class="params">()</span></span> &#123;</span><br><span class="line">    client := redis.NewClient(...)</span><br><span class="line">    <span class="comment">// 尝试加锁</span></span><br><span class="line">    <span class="keyword">if</span> ok := client.SetNX(LOCK_KEY, <span class="string">&quot;&quot;</span>); !ok &#123;</span><br><span class="line">        logger.Error(<span class="string">&quot;Lock fail...&quot;</span>)</span><br><span class="line">        <span class="keyword">return</span></span><br><span class="line">    &#125;</span><br><span class="line">    logger.Info(<span class="string">&quot;Lock succ...&quot;</span>)</span><br><span class="line">    <span class="comment">// 访问共享资源</span></span><br><span class="line"></span><br><span class="line">    <span class="comment">// 解锁</span></span><br><span class="line">    client.Del(LOCK_KEY)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<img src="/2022/11/27/redlock/redlock1.png" class="">
+
+<p>上图是使用<code>SET NX</code>来实现分布式锁的示例情况：</p>
+<ol>
+<li>客户端1使用<code>SET NX</code>获取锁，由于KEY不存在，加锁成功；</li>
+<li>客户端2使用<code>SET NX</code>获取锁，由于KEY已存在，加锁失败；</li>
+<li>客户端1访问共享资源；</li>
+<li>客户端1使用<code>DEL</code>解锁；</li>
+<li>客户端2使用<code>SET NX</code>获取锁，由于KEY已删除，加锁成功。</li>
+</ol>
+<h3 id="过期时间"><a href="#过期时间" class="headerlink" title="过期时间"></a>过期时间</h3><p>考虑一种情况，如果加锁的客户端因为一些异常挂掉就会产生<strong>死锁</strong>，那么其它客户端永远也无法获取到该锁，无法访问共享资源。下图描述了这种问题，客户端2永远也无法加锁。</p>
+<img src="/2022/11/27/redlock/redlock2.png" class="">
+
+<p>因此不能让锁被某个客户端永久持有，一种最简单的策略就是给锁加上过期时间，从而使锁的持有变为一段有限时间的<strong>租约</strong>，保证了锁的<strong>活性</strong>。如下图所示，在客户端1的租约到期以后，客户端2可以成功加锁并访问共享资源。</p>
+<img src="/2022/11/27/redlock/redlock3.png" class="">
+
+<h3 id="客户端标识"><a href="#客户端标识" class="headerlink" title="客户端标识"></a>客户端标识</h3><p>由于增加了过期时间，租约到期可能会引起锁的误删，下图描述了这种错误可能发生的场景。</p>
+<img src="/2022/11/27/redlock/redlock4.png" class="">
+
+<ol>
+<li>客户端1首先加锁，并成功访问到了资源，但由于延时过长，导致锁过期；</li>
+<li>客户端2在客户端1加的锁过期之后访问，因此成功加锁；</li>
+<li>客户端1此时做完操作，使用<code>DEL</code>命令<strong>解锁</strong>，将客户端2的锁误删；</li>
+<li>客户端1又重新获取锁，之前的锁已被删除，因此加锁成功；</li>
+<li>此时客户端1和2<strong>都认为</strong>自己已经进行加锁，出现两者同时访问互斥资源的情况，错误发生。</li>
+</ol>
+<p>这是由于Redis并不会检查解锁的客户端和加锁的客户端是否为同一个，为了解决这个问题，就需要在删除前能够判断锁是否仍然归删锁者所有。一个常见的做法是，将锁的value设置为客户端的唯一标识（如UUID），在删除锁时，先检查值是否一致，一致才删除。需要注意的是，需要保证检查+删除操作具有原子性，因此一般需使用Lua脚本来保证。</p>
+<img src="/2022/11/27/redlock/redlock5.png" class="">
+
+<p>以下是综合考虑之后得到的使用示例：</p>
+<figure class="highlight golang"><figcaption><span>SET NX 分布式锁使用示例2</span></figcaption><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">setNxExample2</span><span class="params">()</span></span> &#123;</span><br><span class="line">    client := redis.NewClient(...)</span><br><span class="line">    <span class="comment">// 尝试加锁</span></span><br><span class="line">    <span class="keyword">if</span> ok := client.SetNX(LOCK_KEY, UNIQUE_CLIENT_ID, EXPIRED_TIME); !ok &#123;</span><br><span class="line">        logger.Error(<span class="string">&quot;Lock fail...&quot;</span>)</span><br><span class="line">        <span class="keyword">return</span></span><br><span class="line">    &#125;</span><br><span class="line">    logger.Info(<span class="string">&quot;Lock succ...&quot;</span>)</span><br><span class="line">    <span class="comment">// 访问共享资源</span></span><br><span class="line"></span><br><span class="line">    <span class="comment">// 解锁</span></span><br><span class="line">    <span class="keyword">var</span> luaScript = redis.NewScript(<span class="string">`</span></span><br><span class="line"><span class="string">		if redis.call(&quot;get&quot;,KEYS[1]) == ARGV[1] then</span></span><br><span class="line"><span class="string">            return redis.call(&quot;del&quot;,KEYS[1])</span></span><br><span class="line"><span class="string">        else</span></span><br><span class="line"><span class="string">            return 0</span></span><br><span class="line"><span class="string">        end</span></span><br><span class="line"><span class="string">	`</span>)</span><br><span class="line">    </span><br><span class="line">    luaScript.Run(Client, []<span class="type">string</span>&#123;LOCK_KEY&#125;, []<span class="type">string</span>&#123;UNIQUE_CLIENT_ID&#125;)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="Redlock"><a href="#Redlock" class="headerlink" title="Redlock"></a>Redlock</h2><h3 id="主从复制Redis与脑裂"><a href="#主从复制Redis与脑裂" class="headerlink" title="主从复制Redis与脑裂"></a>主从复制Redis与脑裂</h3><p>Redis的主从复制集群模式可能会发生<strong>脑裂</strong>问题：主服务器由于网络问题失去了和其它服务器的连接，但和客户端的连接正常。这时哨兵会重新选举出一个主服务器，当原主服务器恢复连接后，需要全量同步新主服务器的数据。这个问题会造成客户端在网络断连期间在原主服务器上所做的变更丢失。</p>
+<img src="/2022/11/27/redlock/redlock6.png" class="">
+
+<p>脑裂问题实际上就是CAP理论中的出现了网络分区的情况，上面描述的即是放弃一致性，保证分区容错性和可用性的方案。也有放弃可用性的方案，即当Redis的主服务器发现当前有超过一定阈值数量的从服务器断连或超时，就拒绝客户端发起的变更请求并返回错误。</p>
+<h3 id="Redlock实现"><a href="#Redlock实现" class="headerlink" title="Redlock实现"></a>Redlock实现</h3><p>对于基于主从复制的Redis的分布式锁而言，脑裂问题会造成锁的丢失。为了应对这样的问题，实现基于Redis集群的分布式锁，提出了Redlock算法。<br>Redlock要求部署奇数个Redis示例（官方推荐5个），具体的流程如下图所示：</p>
+<img src="/2022/11/27/redlock/redlock7.png" class="" width="500" height="0">
+
+<p>算法假设：NPC（分布式系统的三种问题：Network Delay、Processor Pause、Clock Drift）造成的误差相比于TTL（锁的有效期）来说是非常小的。</p>
+<h2 id="参考链接"><a href="#参考链接" class="headerlink" title="参考链接"></a>参考链接</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/378797329">深度剖析：Redis分布式锁到底安全吗？看完这篇文章彻底懂了！</a></li>
+<li><a target="_blank" rel="noopener" href="https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html">How to do distributed locking</a></li>
+<li><a target="_blank" rel="noopener" href="https://redis.io/docs/manual/patterns/distributed-locks/#safety-arguments">Distributed Locks with Redis</a></li>
+<li><a target="_blank" rel="noopener" href="http://antirez.com/news/101">Is Redlock safe?</a></li>
+</ol>
+
+  </div>
+</article>
+
+
+
+        
+          <div id="footer-post-container">
+  <div id="footer-post">
+
+    <div id="nav-footer" style="display: none">
+      <ul>
+         
+          <li><a href="/">首页</a></li>
+         
+          <li><a href="/archives/">归档</a></li>
+         
+          <li><a href="/about/">关于</a></li>
+        
+      </ul>
+    </div>
+
+    <div id="toc-footer" style="display: none">
+      <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Redis%E4%B8%8E%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81"><span class="toc-number">1.</span> <span class="toc-text">Redis与分布式锁</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#SET-NX"><span class="toc-number">1.1.</span> <span class="toc-text">SET NX</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E8%BF%87%E6%9C%9F%E6%97%B6%E9%97%B4"><span class="toc-number">1.2.</span> <span class="toc-text">过期时间</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%AE%A2%E6%88%B7%E7%AB%AF%E6%A0%87%E8%AF%86"><span class="toc-number">1.3.</span> <span class="toc-text">客户端标识</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Redlock"><span class="toc-number">2.</span> <span class="toc-text">Redlock</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%B8%BB%E4%BB%8E%E5%A4%8D%E5%88%B6Redis%E4%B8%8E%E8%84%91%E8%A3%82"><span class="toc-number">2.1.</span> <span class="toc-text">主从复制Redis与脑裂</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Redlock%E5%AE%9E%E7%8E%B0"><span class="toc-number">2.2.</span> <span class="toc-text">Redlock实现</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E9%93%BE%E6%8E%A5"><span class="toc-number">3.</span> <span class="toc-text">参考链接</span></a></li></ol>
+    </div>
+
+    <div id="share-footer" style="display: none">
+      <ul>
+  <li><a class="icon" target="_blank" rel="noopener" href="http://www.facebook.com/sharer.php?u=http://example.com/2022/11/27/redlock/"><i class="fab fa-facebook fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="https://twitter.com/share?url=http://example.com/2022/11/27/redlock/&text=Redis分布式锁"><i class="fab fa-twitter fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="http://www.linkedin.com/shareArticle?url=http://example.com/2022/11/27/redlock/&title=Redis分布式锁"><i class="fab fa-linkedin fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="https://pinterest.com/pin/create/bookmarklet/?url=http://example.com/2022/11/27/redlock/&is_video=false&description=Redis分布式锁"><i class="fab fa-pinterest fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="mailto:?subject=Redis分布式锁&body=Check out this article: http://example.com/2022/11/27/redlock/"><i class="fas fa-envelope fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="https://getpocket.com/save?url=http://example.com/2022/11/27/redlock/&title=Redis分布式锁"><i class="fab fa-get-pocket fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="http://reddit.com/submit?url=http://example.com/2022/11/27/redlock/&title=Redis分布式锁"><i class="fab fa-reddit fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="http://www.stumbleupon.com/submit?url=http://example.com/2022/11/27/redlock/&title=Redis分布式锁"><i class="fab fa-stumbleupon fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="http://digg.com/submit?url=http://example.com/2022/11/27/redlock/&title=Redis分布式锁"><i class="fab fa-digg fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="http://www.tumblr.com/share/link?url=http://example.com/2022/11/27/redlock/&name=Redis分布式锁&description="><i class="fab fa-tumblr fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" target="_blank" rel="noopener" href="https://news.ycombinator.com/submitlink?u=http://example.com/2022/11/27/redlock/&t=Redis分布式锁"><i class="fab fa-hacker-news fa-lg" aria-hidden="true"></i></a></li>
+</ul>
+
+    </div>
+
+    <div id="actions-footer">
+        <a id="menu" class="icon" href="#" onclick="$('#nav-footer').toggle();return false;"><i class="fas fa-bars fa-lg" aria-hidden="true"></i> 菜单</a>
+        <a id="toc" class="icon" href="#" onclick="$('#toc-footer').toggle();return false;"><i class="fas fa-list fa-lg" aria-hidden="true"></i> 目录</a>
+        <a id="share" class="icon" href="#" onclick="$('#share-footer').toggle();return false;"><i class="fas fa-share-alt fa-lg" aria-hidden="true"></i> 分享</a>
+        <a id="top" style="display:none" class="icon" href="#" onclick="$('html, body').animate({ scrollTop: 0 }, 'fast');"><i class="fas fa-chevron-up fa-lg" aria-hidden="true"></i> 返回顶部</a>
+    </div>
+
+  </div>
+</div>
+
+        
+        <footer id="footer">
+  <div class="footer-left">
+    Copyright &copy;
+    
+    
+    2022
+    Ian Xiao
+  </div>
+  <div class="footer-right">
+    <nav>
+      <ul>
+        <!--
+       --><li><a href="/">首页</a></li><!--
+     --><!--
+       --><li><a href="/archives/">归档</a></li><!--
+     --><!--
+       --><li><a href="/about/">关于</a></li><!--
+     -->
+      </ul>
+    </nav>
+  </div>
+</footer>
+
+    </div>
+    <!-- styles -->
+
+
+
+  <link rel="preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css" crossorigin="anonymous" onload="this.onload=null;this.rel='stylesheet'"/>
+
+
+    <!-- jquery -->
+ 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js" crossorigin="anonymous"></script> 
+
+
+
+
+<!-- clipboard -->
+
+  
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/2.0.7/clipboard.min.js" crossorigin="anonymous"></script> 
+  
+  <script type="text/javascript">
+  $(function() {
+    // copy-btn HTML
+    var btn = "<span class=\"btn-copy tooltipped tooltipped-sw\" aria-label=\"复制到粘贴板！\">";
+    btn += '<i class="far fa-clone"></i>';
+    btn += '</span>'; 
+    // mount it!
+    $(".highlight table").before(btn);
+    var clip = new ClipboardJS('.btn-copy', {
+      text: function(trigger) {
+        return Array.from(trigger.nextElementSibling.querySelectorAll('.code')).reduce((str,it)=>str+it.innerText+'\n','')
+      }
+    });
+    clip.on('success', function(e) {
+      e.trigger.setAttribute('aria-label', "复制成功！");
+      e.clearSelection();
+    })
+  })
+  </script>
+
+
+<script src="/js/main.js"></script>
+
+<!-- search -->
+
+<!-- Google Analytics -->
+
+<!-- Baidu Analytics -->
+
+<!-- Cloudflare Analytics -->
+
+<!-- Umami Analytics -->
+
+<!-- Disqus Comments -->
+
+<!-- utterances Comments -->
+
+</body>
+</html>
